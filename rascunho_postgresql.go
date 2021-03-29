@@ -16,6 +16,10 @@ func main() {
 	connection := Connect("localhost", 5432, "valter", "valter", "app_sistema")
 	taskClientStorage := infrastructure.NewTaskClientStoragePostgres(connection)
 
+	tasks, errorGetTask := taskClientStorage.GetAllTaskNotStartedByType("HELLO")
+	fmt.Println(errorGetTask)
+	fmt.Println(len(tasks))
+	//fmt.Println(tasks)
 	//testes(taskClientStorage)
 	//createTaskType(taskClientStorage)
 	createTask(taskClientStorage)

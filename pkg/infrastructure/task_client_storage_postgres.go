@@ -58,7 +58,8 @@ func (t TaskClientStoragePostgres) GetTaskTypeByName(name string) (client.TaskTy
 func (t TaskClientStoragePostgres) GetAllTaskNotStartedByType(name string) ([]client.Task, error) {
 
 	strQuery :=
-		`SELECT uuid, task_type_name , input , output , start_time, end_time, error, finish, created_time
+		`SELECT uuid, task_type_name , input , output , start_time, end_time, error, finish, created_time,
+         tt.description, tt.input_schema, tt.output_schema, tt.cron_frequent
          FROM job_task.task t 
          INNER JOIN job_task.task_type tt ON (t.task_type_name=tt.name)
          WHERE (finish is null OR finish ='N') AND (enable='S' OR  enable IS NULL) AND task_type_name = $1;`
@@ -79,7 +80,7 @@ func (t TaskClientStoragePostgres) GetAllTaskNotStartedByType(name string) ([]cl
 		strError := sql.NullString{}
 		strFinish := sql.NullString{}
 
-		rows.Scan(&task.Uuid,
+		errorScan :=rows.Scan(&task.Uuid,
 			&task.TaskType.Name,
 			&task.Input,
 			&task.Output,
@@ -87,8 +88,16 @@ func (t TaskClientStoragePostgres) GetAllTaskNotStartedByType(name string) ([]cl
 			&endTime,
 			&strError,
 			&strFinish,
-			&task.CreatedTime)
+			&task.CreatedTime,
+			&task.TaskType.Description,
+			&task.TaskType.InputSchema,
+			&task.TaskType.OutputSchema,
+			&task.TaskType.CronFrequent,
+			)
 
+		if errorScan!=nil {
+			return tasks, errorScan
+		}
 		task.StartTime = startTime.Time
 		task.EndTime = endTime.Time
 		task.Error = strError.String
