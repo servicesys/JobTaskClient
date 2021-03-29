@@ -1,52 +1,31 @@
 package infrastructure
 
 import (
+	"JobTaskClient/pkg/client"
 	"context"
+	"database/sql"
 	"fmt"
 	"github.com/jackc/pgx/v4"
-	"os"
+	"github.com/satori/go.uuid"
 )
 
 type TaskClientStoragePostgres struct {
 	dbConnection *pgx.Conn
 }
 
-func NewTaskClientStoragePostgres() client.TaskClientStorage {
+func NewTaskClientStoragePostgres(connection *pgx.Conn) client.TaskClientStorage {
 
-	/**
-	DB.HOST="localhost"
-	DB.PORT="5432"
-	DB.USER="valter"
-	DB.PASS="valter"
-	DB.NAME="app_sistema"
-	*/
-	connection := Connect("localhost", 5432, "valter", "valter", "app_sistema")
 	storagePostgres := &TaskClientStoragePostgres{
 		dbConnection: connection,
 	}
-
 	return storagePostgres
 }
-func Connect(host string, port int, user string, pass string, db string) *pgx.Conn {
 
-	psqlInfo := fmt.Sprintf("host=%s port=%d user=%s "+
-		"password=%s dbname=%s sslmode=disable",
-		host, port, user, pass, db)
-
-	dbConn, err := pgx.Connect(context.Background(), psqlInfo)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Unable to connect to database: %v\n", err)
-		panic(err)
-	}
-	return dbConn
-
-}
-
-func (t TaskClientStoragePostgres) CreateTaskType(taskType server.TaskType) error {
+func (t TaskClientStoragePostgres) CreateTaskType(taskType client.TaskType) error {
 
 	queryInsert := `INSERT INTO 
-                     job_task.task_type(name, description, input_schema, output_schema, cron_frequent)
-                     VALUES($1, $2, $3, $4 , $5);`
+                     job_task.task_type(name, description, input_schema, output_schema, cron_frequent,enable)
+                     VALUES($1, $2, $3, $4 , $5, 'S');`
 
 	err := doExecute(t.dbConnection, queryInsert,
 		taskType.Name, taskType.Description,
@@ -54,11 +33,17 @@ func (t TaskClientStoragePostgres) CreateTaskType(taskType server.TaskType) erro
 	return err
 }
 
-func (t TaskClientStoragePostgres) GetTaskTypeByName(name string) (server.TaskType, error) {
+func (t TaskClientStoragePostgres) GetTaskTypeByName(name string) (client.TaskType, error) {
 
-	strQuery := `SELECT name, description, input_schema, output_schema, cron_frequent FROM job_task.task_type WHERE name=$1;`
+	fmt.Println(name)
+	strQuery := `SELECT name, 
+                        description, 
+                         input_schema, 
+                         output_schema, 
+                        cron_frequent 
+                 FROM job_task.task_type WHERE name=$1;`
 	rows, errQuery := t.dbConnection.Query(context.Background(), strQuery, name)
-	mtype := server.TaskType{}
+	mtype := client.TaskType{}
 
 	defer rows.Close()
 	if errQuery != nil {
@@ -68,6 +53,67 @@ func (t TaskClientStoragePostgres) GetTaskTypeByName(name string) (server.TaskTy
 		rows.Scan(&mtype.Name, &mtype.Description, &mtype.InputSchema, &mtype.OutputSchema, &mtype.CronFrequent)
 	}
 	return mtype, nil
+}
+
+func (t TaskClientStoragePostgres) GetAllTaskNotStartedByType(name string) ([]client.Task, error) {
+
+	strQuery :=
+		`SELECT uuid, task_type_name , input , output , start_time, end_time, error, finish, created_time
+         FROM job_task.task t 
+         INNER JOIN job_task.task_type tt ON (t.task_type_name=tt.name)
+         WHERE (finish is null OR finish ='N') AND (enable='S' OR  enable IS NULL) AND task_type_name = $1;`
+
+	tasks := make([]client.Task, 0)
+	rows, errQuery := t.dbConnection.Query(context.Background(), strQuery, name)
+	task := client.Task{}
+
+	defer rows.Close()
+	if errQuery != nil {
+		return tasks, errQuery
+	}
+	for rows.Next() {
+		task = client.Task{}
+		task.TaskType = client.TaskType{}
+		startTime := sql.NullTime{}
+		endTime := sql.NullTime{}
+		strError := sql.NullString{}
+		strFinish := sql.NullString{}
+
+		rows.Scan(&task.Uuid,
+			&task.TaskType.Name,
+			&task.Input,
+			&task.Output,
+			&startTime,
+			&endTime,
+			&strError,
+			&strFinish,
+			&task.CreatedTime)
+
+		task.StartTime = startTime.Time
+		task.EndTime = endTime.Time
+		task.Error = strError.String
+		task.Finish = strFinish.String
+		tasks = append(tasks, task)
+	}
+	return tasks, nil
+}
+
+func (t TaskClientStoragePostgres) AddTask(task client.Task) error {
+
+	task.Uuid = uuid.NewV4().String()
+	query := ` INSERT INTO job_task.task (uuid, task_type_name, input, created_time) VALUES($1 , $2, $3 ,now());`
+	err := doExecute(t.dbConnection, query, task.Uuid, task.TaskType.Name, task.Input)
+	return err
+}
+
+func (t TaskClientStoragePostgres) UpdateTask(task client.Task) error {
+
+	query := `UPDATE job_task.task 
+              SET output=$1 , history= $2, start_time=$3, end_time= $4 , error=$5, finish=$6 WHERE uuid=$7;`
+
+	err := doExecute(t.dbConnection, query, task.Output, task.History, task.StartTime, task.EndTime,
+		task.Error, task.Finish, task.Uuid)
+	return err
 }
 
 func doExecute(db *pgx.Conn, query string, args ...interface{}) error {
