@@ -1,11 +1,12 @@
 package main
 
 import (
-	"JobTaskClient/pkg/client"
-	"JobTaskClient/pkg/infrastructure"
 	"context"
 	"fmt"
 	"github.com/jackc/pgx/v4"
+	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/servicesys/JobTaskClient/pkg/client"
+	"github.com/servicesys/JobTaskClient/pkg/infrastructure"
 	"os"
 	"time"
 )
@@ -13,12 +14,12 @@ import (
 func main() {
 
 	fmt.Println("DB")
-	connection := Connect("localhost", 5432, "valter", "valter", "app_sistema")
+	connection := CreatePGXPool("localhost", 5432, "valter", "valter", "app_sistema")
 	taskClientStorage := infrastructure.NewTaskClientStoragePostgres(connection)
 
-	tasks, errorGetTask := taskClientStorage.GetAllTaskNotStartedByType("HELLO")
-	fmt.Println(errorGetTask)
-	fmt.Println(len(tasks))
+	//tasks, errorGetTask := taskClientStorage.GetAllTaskNotStartedByType("HELLO")
+	//fmt.Println(errorGetTask)
+	//fmt.Println(len(tasks))
 	//fmt.Println(tasks)
 	//testes(taskClientStorage)
 	//createTaskType(taskClientStorage)
@@ -49,7 +50,7 @@ func createTaskType(taskClientStorage client.TaskClientStorage) {
 
 func createTask(storage client.TaskClientStorage) {
 
-	textoJSon := ` { "title" : " Hello world task job input" , "text" :  "HELLO"}`
+	textoJSon := ` {"title" : " Hello world task job input" , "text" :  "HELLO"}` //
 
 	input := []byte(textoJSon)
 
@@ -60,9 +61,9 @@ func createTask(storage client.TaskClientStorage) {
 		listHelloTask[i] = client.Task{
 			//Uuid: "hello" + string(i),
 			TaskType: client.TaskType{
-				Name:         "HELLO",
+				Name: "HELLO",
 			},
-			Input:       input,
+			Input: input,
 		}
 		errorAddTask := storage.AddTask(listHelloTask[i])
 		fmt.Println(errorAddTask)
@@ -123,8 +124,7 @@ func testes(taskClientStorage client.TaskClientStorage) {
 	fmt.Println(len(tasks))
 }
 
-
-func Connect(host string, port int, user string, pass string, db string) *pgx.Conn {
+func Connectx(host string, port int, user string, pass string, db string) *pgx.Conn {
 
 	psqlInfo := fmt.Sprintf("host=%s port=%d user=%s "+
 		"password=%s dbname=%s sslmode=disable",
@@ -139,6 +139,24 @@ func Connect(host string, port int, user string, pass string, db string) *pgx.Co
 
 }
 
+func CreatePGXPool(host string, port int, user string, pass string, db string) *pgxpool.Pool {
+
+	connString := "postgres://" + user + ":" + pass + "@" + host + "/" + db + "?sslmode=disable" + "&" + "application_name=" + "rascunho"
+
+	configPool, errConfPool := pgxpool.ParseConfig(connString)
+	if errConfPool != nil {
+		panic(errConfPool)
+	}
+	configPool.MinConns = 1
+	configPool.MaxConns = 4
+
+	poolConn, errPool := pgxpool.ConnectConfig(context.Background(), configPool)
+	if errPool != nil {
+		fmt.Fprintf(os.Stderr, "Unable to connect to database: %v\n", errPool)
+		os.Exit(1)
+	}
+	return poolConn
+}
 func getSchema() []byte {
 
 	SCHEMA := `{
@@ -176,5 +194,3 @@ func getSchema() []byte {
 `
 	return []byte(SCHEMA)
 }
-
-
